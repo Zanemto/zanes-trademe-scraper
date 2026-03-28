@@ -1,4 +1,4 @@
-# TradeMe Car Deal Scraper
+# Zanes TradeMe Car Deal Scraper
 
 Scrapes new TradeMe listings, scores them against historical prices,
 and emails the top 5 deals from the latest scrape.

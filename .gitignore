@@ -1,0 +1,11 @@
+# Secrets / local config
+config.py
+
+# Local data
+trademe_cars.db
+*.log
+
+# Virtual envs / caches
+venv/
+.venv/
+__pycache__/

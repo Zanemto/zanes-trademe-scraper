@@ -1,5 +1,5 @@
 """
-TradeMe Car Scraper
+Zanes TradeMe Car Scraper
 Scrapes newly listed cars from TradeMe matching your filters,
 scores them for value, and emails you the best deals when you run mailer.py.
 """

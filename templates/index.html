@@ -31,16 +31,12 @@
   </div>
 </div>
 
-<!-- Actions -->
-<div class="row g-3">
+<!-- Manual run -->
+<div class="row g-3 mb-4">
   <div class="col-md-6">
     <div class="card">
       <div class="card-header">Run Scraper</div>
       <div class="card-body">
-        <p class="text-muted small mb-3">
-          Scrapes TradeMe using your scraper filter sets and saves new listings to the database.
-          A browser window will open — this can take several minutes.
-        </p>
         {% if scraper_names %}
         <div class="mb-3">
           {% for name in scraper_names %}
@@ -64,10 +60,6 @@
     <div class="card">
       <div class="card-header">Run Mailer</div>
       <div class="card-body">
-        <p class="text-muted small mb-3">
-          Scores recent listings and sends email reports based on your mailer filter sets.
-          Make sure you have run the scraper first.
-        </p>
         {% if mailer_names %}
         <div class="mb-3">
           {% for name in mailer_names %}
@@ -89,6 +81,68 @@
   </div>
 </div>
 
+<!-- Schedule -->
+<h5 class="mb-3">Automatic Schedule</h5>
+<div class="row g-3">
+
+  {% for type, label, btn_class, names, next_run, last_run in [
+    ('scraper', 'Scraper', 'primary', scraper_names, scraper_next, scraper_last),
+    ('mailer',  'Mailer',  'success', mailer_names,  mailer_next,  mailer_last),
+  ] %}
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>{{ label }} Schedule</span>
+        {% if next_run %}
+        <span class="text-muted small">Next run: {{ next_run }}</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="{{ type }}-enabled"
+              {% if schedule[type]['enabled'] %}checked{% endif %}>
+            <label class="form-check-label" for="{{ type }}-enabled">Enabled</label>
+          </div>
+          <input type="time" class="form-control form-control-sm" id="{{ type }}-time"
+            style="width:120px;"
+            value="{{ '%02d:%02d' % (schedule[type]['hour'], schedule[type]['minute']) }}">
+        </div>
+
+        {% if names %}
+        <div class="mb-3">
+          <div class="text-muted small mb-1">Filter sets to run <span class="text-muted">(all if none selected)</span></div>
+          {% for name in names %}
+          <div class="form-check">
+            <input class="form-check-input {{ type }}-sched-check" type="checkbox"
+              value="{{ name }}" id="{{ type }}-sched-{{ loop.index }}"
+              {% if name in schedule[type]['filter_names'] or not schedule[type]['filter_names'] %}checked{% endif %}>
+            <label class="form-check-label" for="{{ type }}-sched-{{ loop.index }}">{{ name }}</label>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-{{ btn_class }} btn-sm" onclick="saveSchedule('{{ type }}')">Save</button>
+          <span class="text-success small" id="{{ type }}-sched-saved" style="display:none;">Saved!</span>
+        </div>
+
+        {% if last_run %}
+        <div class="mt-3 p-2 rounded small" style="background:#f9fafb;border:1px solid #e5e7eb;">
+          <span class="{% if last_run['ok'] %}text-success{% else %}text-danger{% endif %} fw-semibold">
+            Last run: {{ last_run['time'] }} — {{ 'OK' if last_run['ok'] else 'Failed' }}
+          </span>
+          <pre class="output mt-1 mb-0" style="max-height:120px;font-size:11px;">{{ last_run['output'] }}</pre>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -97,7 +151,6 @@ function runJob(type) {
   const btn = document.getElementById(type + '-btn');
   const outputDiv = document.getElementById(type + '-output');
   const pre = document.getElementById(type + '-pre');
-
   const checked = [...document.querySelectorAll('.' + type + '-check:checked')].map(el => el.value);
 
   btn.disabled = true;
@@ -120,7 +173,6 @@ function poll(jobId, type, btn, pre) {
     .then(job => {
       pre.textContent = job.output;
       pre.scrollTop = pre.scrollHeight;
-
       if (job.done) {
         btn.disabled = false;
         btn.textContent = type === 'scraper' ? 'Run Scraper' : 'Run Mailer';
@@ -129,6 +181,27 @@ function poll(jobId, type, btn, pre) {
         setTimeout(() => poll(jobId, type, btn, pre), 1500);
       }
     });
+}
+
+function saveSchedule(type) {
+  const enabled = document.getElementById(type + '-enabled').checked;
+  const [hour, minute] = document.getElementById(type + '-time').value.split(':').map(Number);
+  const filterNames = [...document.querySelectorAll('.' + type + '-sched-check:checked')].map(el => el.value);
+
+  const current = {{ schedule | tojson }};
+  current[type] = { enabled, hour, minute, filter_names: filterNames };
+
+  fetch('/schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(current),
+  })
+  .then(r => r.json())
+  .then(res => {
+    const el = document.getElementById(type + '-sched-saved');
+    el.style.display = '';
+    setTimeout(() => el.style.display = 'none', 2000);
+  });
 }
 </script>
 {% endblock %}

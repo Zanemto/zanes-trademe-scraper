@@ -1,9 +1,6 @@
 # Zanes TradeMe Car Deal Scraper
 
-Scrapes new TradeMe listings, scores them against historical prices,
-and emails the top 5 deals from the latest scrape.
-
-Edit the filters at the top of `scraper.py` (you can add multiple filter sets).
+Scrapes new TradeMe car listings, scores them against historical prices in a local database, and emails you the best deals. Comes with a web UI to manage everything from the browser.
 
 ---
 
@@ -12,22 +9,21 @@ Edit the filters at the top of `scraper.py` (you can add multiple filter sets).
 ### 1. Install dependencies
 
 ```bash
-pip install playwright
+pip install playwright apscheduler waitress flask
 python -m playwright install chromium
 ```
 
 ### 2. Configure your email (Gmail recommended)
 
-Gmail requires an **App Password** (your real Gmail password will not work
-because of 2FA). Here is how to get one:
+Gmail requires an **App Password** (your real Gmail password will not work because of 2FA). Here is how to get one:
 
-1. Go to your Google Account -> **Security**
+1. Go to your Google Account → **Security**
 2. Under "How you sign in to Google", click **2-Step Verification** (enable it if not already)
-3. Scroll to the bottom -> **App passwords**
+3. Scroll to the bottom → **App passwords**
 4. Create a new app password (name it "TradeMe Scraper")
 5. Copy the 16-character password Google gives you
 
-Rename `config.example.py` to `config.py`, then edit it:
+Rename `config.example.py` to `config.py`, then fill it in:
 
 ```python
 SMTP_HOST = "smtp.gmail.com"
@@ -40,104 +36,121 @@ EMAIL_FROM = "example@gmail.com"
 EMAIL_TO   = "example@gmail.com"    # where to receive alerts
 ```
 
-### 3. Test it manually
+### 3. Start the UI
 
 ```bash
-# Just scrape and print results (no email)
+python app.py
+```
+
+Then open **http://localhost:5000** in your browser.
+
+---
+
+## Web UI
+
+The UI has three pages:
+
+### Dashboard
+- Shows total listings, scraped today, and scraped in the last 7 days
+- **Run Scraper** — manually trigger a scrape right now
+- **Run Mailer** — manually send the email report right now
+- **Automatic Schedule** — set a daily time for the scraper and mailer to run automatically (see below)
+
+For both manual runs and the schedule, you can choose which filter sets to include using the checkboxes.
+
+### Listings
+A searchable, paginated table of everything in the database — title, price, kilometres, year, make, model, listing type, region, and date scraped. Each title links to the original TradeMe listing.
+
+### Filters
+Two tabs — **Scraper Filters** and **Mailer Filters** — where you can add, edit, and remove filter sets without touching any code. Changes are saved immediately to `scraper_filters.json` and `mailer_filters.json`.
+
+---
+
+## Automatic Scheduling
+
+On the Dashboard under **Automatic Schedule**, you can enable a daily run time for the scraper and mailer independently. The schedule is stored in `schedule_config.json` and applied when the app starts.
+
+> **Note:** The schedule only runs while `app.py` is running. If you restart the app, the saved schedule is automatically re-applied.
+
+The last scheduled run result (time, success/failure, and output) is shown on the dashboard.
+
+---
+
+## Filter sets
+
+### Scraper filters (`scraper_filters.json`)
+
+Controls what the scraper searches for on TradeMe. Each filter set is one TradeMe search URL. All results are saved to the database.
+
+| Field | Description |
+|-------|-------------|
+| `name` | Label shown in the UI |
+| `make` | TradeMe URL slug, e.g. `mercedes-benz`, `toyota` (blank = any) |
+| `model` | TradeMe URL slug, e.g. `c-200`, `corolla` (blank = any) |
+| `year_min` | Minimum year |
+| `min_price` / `max_price` | Price range |
+| `max_kms` | Maximum odometer |
+| `region_id` | TradeMe region ID (blank = all NZ) |
+| `classifieds` | `true` = classifieds only, `false` = auctions only, blank = both |
+| `max_pages` | How many pages to scrape per filter set (~20 listings per page) |
+
+> **Make vs model format:** The scraper `make` and `model` fields go directly into the TradeMe URL path, so they must use TradeMe's slug format (lowercase, hyphens). For example, `mercedes-benz` not `Mercedes`.
+
+### Mailer filters (`mailer_filters.json`)
+
+Controls which listings from the database are included in each email report. Each filter set generates one email.
+
+| Field | Description |
+|-------|-------------|
+| `name` | Label shown in the UI and email subject |
+| `make` | Matched case-insensitively against extracted make, e.g. `Mercedes` |
+| `model` | Single model or comma-separated list, e.g. `C 200, C 180` |
+| `year_min` | Minimum year |
+| `min_price` / `max_price` | Price range |
+| `max_kms` | Maximum odometer |
+| `region_id` | TradeMe region ID (blank = all) |
+| `classifieds` | `true` = classifieds only, `false` = auctions only, blank = both |
+| `year_window` | Compare against cars within ±this many years (default 2) |
+| `km_window` | Compare against cars within ±this many km (blank = ignore) |
+| `days_back` | Only email listings scraped within this many days |
+
+> **Make format difference:** The mailer `make` is matched against what the scraper extracted from the listing title (e.g. `Mercedes`, not `mercedes-benz`).
+
+---
+
+## How deal scoring works
+
+Each listing is compared to the **median price** of similar cars already in the database (same make, same model, year within ±`year_window`, optionally kilometres within ±`km_window`). If fewer than 3 comparable listings exist, it falls back to the overall database median.
+
+The score is **price as a percentage of the median** — lower is better.
+
+| Badge | Score | Meaning |
+|-------|-------|---------|
+| Hot deal | ≤ 80% | Priced well below median |
+| Good deal | ≤ 90% | Below median |
+| New listing | > 90% | At or above median |
+
+Scoring improves over time as more listings accumulate in the database.
+
+---
+
+## Running without the UI
+
+You can also run the scraper and mailer directly from the terminal:
+
+```bash
+# Scrape all filter sets
 python scraper.py
 
-# Send email (after scraping)
+# Scrape specific filter sets by name
+python scraper.py --filters "Mercedes C Class,Toyota Corolla"
+
+# Send email for all mailer filter sets
 python mailer.py
+
+# Send email for specific filter sets
+python mailer.py --filters "Mercedes C Class"
 ```
-
----
-
-## Multiple filter sets
-
-You can scrape multiple filter sets in one run by editing `FILTER_SETS` in `scraper.py`:
-
-```python
-FILTER_SETS = [
-    {
-        "name": "Mercedes C200",
-        "make": "mercedes-benz",
-        "model": "c-200",
-        "year_min": 2010,
-        "min_price": None,
-        "max_price": 15000,
-        "max_kms": 140_000,
-        "region_id": None,
-    },
-    {
-        "name": "Toyota Corolla",
-        "make": "toyota",
-        "model": "corolla",
-        "year_min": 2012,
-        "min_price": 3000,
-        "max_price": 12000,
-        "max_kms": 160_000,
-        "region_id": 2,
-    },
-]
-```
-
-Each filter set is scraped in sequence and all results are combined into one run.
-The database stores listings from all filter sets together, and scoring uses
-historical listings that match the same make/model and year window.
-
----
-
-## Run it every day automatically
-
-### Windows (Task Scheduler)
-
-1. Open **Task Scheduler** -> Create Basic Task
-2. Set trigger: **Daily** at 8:00 AM
-3. Action: **Start a program** (create two tasks, 5 minutes apart)
-   - Program: `python`
-   - Arguments: `scraper.py` (first task)
-   - Start in: `C:\path\to\trademe_scraper`
-4. Second task:
-   - Program: `python`
-   - Arguments: `mailer.py` (second task)
-   - Start in: `C:\path\to\trademe_scraper`
-
-### Mac / Linux (cron)
-
-Open your crontab:
-```bash
-crontab -e
-```
-
-Add these lines to run every morning at 8am:
-```
-0 8 * * * cd /path/to/trademe_scraper && python scraper.py >> scraper.log 2>&1
-5 8 * * * cd /path/to/trademe_scraper && python mailer.py >> mailer.log 2>&1
-```
-
-Replace `/path/to/trademe_scraper` with the actual folder path
-(e.g. `/Users/yourname/trademe_scraper`).
-
----
-
-## How the deal scoring works
-
-Each new listing is compared to the **median price** of similar cars
-(same make, same model, year within ±2 years by default) already in the database.
-You can change this with `YEAR_WINDOW` in `scraper.py`.
-
-The database uses WAL mode and an index on `(make, model, year)` for faster
-performance as it grows.
-The score is **price as a percentage of the median** (lower is better).
-
-| Score | Meaning |
-|-------|---------|
-| ≤ 80% | Hot deal - priced well below median |
-| ≤ 90% | Good deal |
-| 90–110% | Near median |
-| > 110% | Above median |
-
-**Note:** Scoring improves over time as more listings accumulate in the database.
 
 ---
 
@@ -145,34 +158,34 @@ The score is **price as a percentage of the median** (lower is better).
 
 | File | Purpose |
 |------|---------|
-| `scraper.py` | Playwright scraper + DB + deal scorer |
-| `mailer.py` | Emails the top 5 deals from the latest scrape |
-| `config.py` | Your email credentials (local only) |
+| `app.py` | Flask web UI + APScheduler |
+| `scraper.py` | Playwright scraper + SQLite storage |
+| `mailer.py` | Deal scorer + HTML email sender |
+| `config.py` | Your email credentials (local only, not committed) |
 | `config.example.py` | Template config to copy |
+| `scraper_filters.json` | Scraper filter sets and max pages setting |
+| `mailer_filters.json` | Mailer filter sets |
+| `schedule_config.json` | Saved automatic schedule |
 | `trademe_cars.db` | SQLite database (created automatically) |
-| `db_view.py` | View recent listings from the database |
-| `scraper.log` | Cron output log |
-| `mailer.log` | Cron output log |
+| `db_view.py` | CLI tool to view recent listings from the database |
+| `templates/` | HTML templates for the web UI |
 
 ---
 
 ## Troubleshooting
 
 **No listings found / 0 cards scraped**
-TradeMe may have updated their HTML structure. Open `scraper.py` and
-update the CSS selectors in `scrape_page()`. Use Playwright's
-`page.pause()` in headed mode to inspect the live DOM:
+TradeMe may have updated their HTML. To debug, temporarily switch the scraper to headed mode and pause it:
 ```python
-browser = await p.chromium.launch(headless=False)  # see the browser
-await page.pause()                                  # opens inspector
+browser = await p.chromium.launch(headless=False)
+await page.pause()  # opens the Playwright inspector
 ```
 
 **Blocked / Cloudflare challenge**
-- Increase the sleep delays in `scrape_all_pages()`
-- Run at off-peak hours (the cron runs at 8am by default - try 3am)
-- Reduce `MAX_PAGES` to scrape less
+- Increase the sleep delays in `scrape_all_pages()` in `scraper.py`
+- Reduce `max_pages` in the UI
+- Try scheduling the scrape at an off-peak time like 3am
 
 **Email not sending**
 - Double-check your App Password in `config.py`
 - Make sure 2FA is enabled on your Google account
-- Check `mailer.log` for the full error

@@ -9,7 +9,7 @@
       "min_price": 1100,
       "max_price": 7500,
       "max_kms": 200000,
-      "region_id": 2,
+      "region_id": null,
       "classifieds": null
     },
     {

@@ -1,0 +1,19 @@
+{
+  "mailer": {
+    "enabled": true,
+    "filter_names": [
+      "Cars newer than 2005",
+      "Mercedes Mimi"
+    ],
+    "hour": 20,
+    "minute": 15
+  },
+  "scraper": {
+    "enabled": true,
+    "hour": 20,
+    "minute": 0,
+    "filter_names": [
+      "Everything above 2005"
+    ]
+  }
+}

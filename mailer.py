@@ -16,7 +16,6 @@ import config
 # against what was extracted from listing titles — e.g. "Mercedes", not "mercedes-benz".
 MAIL_FILTER_SETS = [
     {
-        "name": "Mercedes C200",
         "make": "Mercedes",
         "model": None,
         "year_min": 2010,
@@ -51,7 +50,7 @@ def build_html_email(deals: list[dict], fset: dict) -> str:
             parts.append(f"region id {fset.get('region_id')}")
         parts.append("newest first")
 
-        label = fset.get("name") or fset.get("make") or "Filter set"
+        label = " ".join(p for p in [fset.get("make"), fset.get("model")] if p) or "Filter set"
         return label + ": " + " · ".join(parts)
 
     def deal_badge(pct: float) -> str:
@@ -96,7 +95,7 @@ def build_html_email(deals: list[dict], fset: dict) -> str:
 
         <!-- Header -->
         <div style="background:#1e3a5f;padding:28px 32px;">
-          <h1 style="color:#fff;margin:0;font-size:22px;">TradeMe Deal Report — {fset.get("name") or "All"}</h1>
+          <h1 style="color:#fff;margin:0;font-size:22px;">TradeMe Deal Report — {" ".join(p for p in [fset.get("make"), fset.get("model")] if p) or "All"}</h1>
           <p style="color:#93c5fd;margin:6px 0 0;font-size:14px;">{date_str}</p>
         </div>
 
@@ -214,7 +213,7 @@ def main():
         return
 
     for fset in MAIL_FILTER_SETS:
-        filter_name = fset.get("name", "")
+        filter_name = " ".join(p for p in [fset.get("make"), fset.get("model")] if p) or "All"
         matched = apply_filter(latest_listings, fset)
         if not matched:
             print(f"No new listings for '{filter_name}'.")

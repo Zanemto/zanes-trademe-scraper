@@ -7,40 +7,52 @@ Configure your email settings in config.py before running.
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from datetime import datetime
-from scraper import init_db, score_deals, FILTER_SETS
+from datetime import datetime, timedelta
+from scraper import init_db, score_deals
 import config
 
+# ── Mail filter sets (edit these to control which emails you receive) ─────────
+# Each entry generates one email. make/model are matched case-insensitively
+# against what was extracted from listing titles — e.g. "Mercedes", not "mercedes-benz".
+MAIL_FILTER_SETS = [
+    {
+        "name": "Mercedes C200",
+        "make": "Mercedes",
+        "model": None,
+        "year_min": 2010,
+        "min_price": None,
+        "max_price": 15000,
+        "max_kms": 140_000,
+    },
+]
+# ─────────────────────────────────────────────────────────────────────────────
 
-def build_html_email(deals: list[dict]) -> str:
+
+def build_html_email(deals: list[dict], fset: dict) -> str:
     """Build a clean HTML email body from the scored deals list."""
     def build_filter_text() -> str:
-        lines = []
-        for fset in FILTER_SETS:
-            parts = [f"make {fset.get('make')}"]
-            if fset.get("model"):
-                parts.append(f"model {fset.get('model')}")
-            if fset.get("year_min") is not None:
-                parts.append(f"year ≥ {fset.get('year_min')}")
-            min_price = fset.get("min_price")
-            max_price = fset.get("max_price")
-            if min_price is not None or max_price is not None:
-                if min_price is not None and max_price is not None:
-                    parts.append(f"price ${min_price:,}–${max_price:,}")
-                elif min_price is not None:
-                    parts.append(f"price ≥ ${min_price:,}")
-                else:
-                    parts.append(f"price ≤ ${max_price:,}")
-            if fset.get("max_kms") is not None:
-                parts.append(f"max {fset.get('max_kms'):,} km")
-            if fset.get("region_id") is not None:
-                parts.append(f"region id {fset.get('region_id')}")
-            parts.append("newest first")
+        parts = [f"make {fset.get('make')}"]
+        if fset.get("model"):
+            parts.append(f"model {fset.get('model')}")
+        if fset.get("year_min") is not None:
+            parts.append(f"year ≥ {fset.get('year_min')}")
+        min_price = fset.get("min_price")
+        max_price = fset.get("max_price")
+        if min_price is not None or max_price is not None:
+            if min_price is not None and max_price is not None:
+                parts.append(f"price ${min_price:,}–${max_price:,}")
+            elif min_price is not None:
+                parts.append(f"price ≥ ${min_price:,}")
+            else:
+                parts.append(f"price ≤ ${max_price:,}")
+        if fset.get("max_kms") is not None:
+            parts.append(f"max {fset.get('max_kms'):,} km")
+        if fset.get("region_id") is not None:
+            parts.append(f"region id {fset.get('region_id')}")
+        parts.append("newest first")
 
-            label = fset.get("name") or fset.get("make") or "Filter set"
-            lines.append(f"{label}: " + " · ".join(parts))
-
-        return "<br>".join(lines)
+        label = fset.get("name") or fset.get("make") or "Filter set"
+        return label + ": " + " · ".join(parts)
 
     def deal_badge(pct: float) -> str:
         # pct is price as % of median (lower is better)
@@ -84,7 +96,7 @@ def build_html_email(deals: list[dict]) -> str:
 
         <!-- Header -->
         <div style="background:#1e3a5f;padding:28px 32px;">
-          <h1 style="color:#fff;margin:0;font-size:22px;">TradeMe Deal Report</h1>
+          <h1 style="color:#fff;margin:0;font-size:22px;">TradeMe Deal Report — {fset.get("name") or "All"}</h1>
           <p style="color:#93c5fd;margin:6px 0 0;font-size:14px;">{date_str}</p>
         </div>
 
@@ -121,8 +133,9 @@ def build_html_email(deals: list[dict]) -> str:
     return html
 
 
-def send_email(html_body: str, num_deals: int):
-    subject = f"TradeMe: {num_deals} new car deals — {datetime.now().strftime('%d %b')}"
+def send_email(html_body: str, num_deals: int, filter_name: str = ""):
+    label = f" — {filter_name}" if filter_name else ""
+    subject = f"TradeMe: {num_deals} new car deals{label} — {datetime.now().strftime('%d %b')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -138,19 +151,15 @@ def send_email(html_body: str, num_deals: int):
 
 
 def fetch_latest_listings(con) -> list[dict]:
-    """Fetch listings from the most recent scraper run."""
-    row = con.execute("SELECT MAX(date_scraped) FROM listings").fetchone()
-    latest = row[0] if row else None
-    if not latest:
-        return []
-
+    """Fetch all listings scraped within the last 3 days."""
+    since = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
     rows = con.execute(
         """
         SELECT listing_id, title, price, kilometres, year, make, model, url, date_scraped
         FROM listings
-        WHERE date_scraped = ?
+        WHERE date_scraped >= ?
         """,
-        (latest,),
+        (since,),
     ).fetchall()
 
     listings = []
@@ -170,6 +179,32 @@ def fetch_latest_listings(con) -> list[dict]:
     return listings
 
 
+def apply_filter(listings: list[dict], fset: dict) -> list[dict]:
+    """Return listings that match the given mail filter set criteria."""
+    results = []
+    for car in listings:
+        make = fset.get("make")
+        if make and make.lower() not in (car.get("make") or "").lower():
+            continue
+        model = fset.get("model")
+        if model and model.lower() not in (car.get("model") or "").lower():
+            continue
+        year_min = fset.get("year_min")
+        if year_min and car.get("year") and car["year"] < year_min:
+            continue
+        min_price = fset.get("min_price")
+        if min_price and car.get("price") and car["price"] < min_price:
+            continue
+        max_price = fset.get("max_price")
+        if max_price and car.get("price") and car["price"] > max_price:
+            continue
+        max_kms = fset.get("max_kms")
+        if max_kms and car.get("kilometres") and car["kilometres"] > max_kms:
+            continue
+        results.append(car)
+    return results
+
+
 def main():
     con = init_db()
     latest_listings = fetch_latest_listings(con)
@@ -178,16 +213,23 @@ def main():
         con.close()
         return
 
-    deals = score_deals(con, latest_listings)
+    for fset in MAIL_FILTER_SETS:
+        filter_name = fset.get("name", "")
+        matched = apply_filter(latest_listings, fset)
+        if not matched:
+            print(f"No new listings for '{filter_name}'.")
+            continue
+
+        deals = score_deals(con, matched)
+        if not deals:
+            print(f"No scoreable deals for '{filter_name}'.")
+            continue
+
+        top_deals = deals[:10]
+        html = build_html_email(top_deals, fset)
+        send_email(html, len(top_deals), filter_name)
+
     con.close()
-
-    if not deals:
-        print("No deals to email.")
-        return
-
-    top_deals = deals[:10]
-    html = build_html_email(top_deals)
-    send_email(html, len(top_deals))
 
 
 if __name__ == "__main__":

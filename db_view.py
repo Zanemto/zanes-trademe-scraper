@@ -1,10 +1,11 @@
 # Run this to view the database
 
 import sqlite3
+from pathlib import Path
 from textwrap import shorten
 
 
-DB_PATH = r"D:\TrademeScraper\trademe_cars.db"
+DB_PATH = Path(__file__).parent / "trademe_cars.db"
 
 
 def main(limit: int = 10):
